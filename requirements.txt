@@ -1,3 +1,3 @@
 python-telegram-bot==13.15
-Flask==2.3.3
-gunicorn==21.2.0
+Flask==3.0.3
+imghdr-py==0.3.0
