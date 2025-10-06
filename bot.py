@@ -813,6 +813,7 @@ def schedule_type_cb(update: Update, context: CallbackContext):
 
 def check_scheduled_posts(context: CallbackContext):
     current_time = datetime.datetime.now().strftime("%H:%M")
+    logger.info(f"Checking scheduled posts at {current_time}")
     scheduled_posts = load_json(SCHEDULED_POSTS_FILE)
     posts = load_json(POST_FILE)
     channels = load_json(CHANNEL_FILE)
@@ -821,6 +822,7 @@ def check_scheduled_posts(context: CallbackContext):
         if sp['time'] == current_time:
             post = next((p for p in posts if p['id'] == sp['post_id']), None)
             if not post:
+                logger.warning(f"Scheduled post {sp['post_id']} not found.")
                 continue
             for ch in channels:
                 try:
@@ -834,6 +836,7 @@ def check_scheduled_posts(context: CallbackContext):
                         context.bot.send_animation(chat_id=ch['id'], animation=post["media_id"], caption=caption or None, parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
                     else:
                         context.bot.send_message(chat_id=ch['id'], text=caption or "(No text)", parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
+                    logger.info(f"Sent scheduled post {sp['post_id']} to channel {ch['id']}")
                 except Exception as e:
                     logger.error(f"Error sending scheduled post {sp['post_id']} to channel {ch['id']}: {e}")
             if sp['type'] == "one_time":
@@ -1067,6 +1070,14 @@ app = Flask(__name__)
 @app.route('/')
 def home():
     return "✅ Telegram MultiPost Bot is running on Render!"
+
+@app.route('/logs')
+def get_logs():
+    try:
+        with open("bot.log", "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        return f"Error reading log: {e}"
 
 # -----------------------
 # Run
