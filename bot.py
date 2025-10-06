@@ -55,10 +55,6 @@ def ensure_files():
 
 # -----------------------
 # Step stack helpers (for one-step back behavior)
-# each user will have context.user_data['step_stack'] = [ {name: str, info: dict}, ... ]
-# push_step(ctx, name, info) -> push
-# pop_step(ctx) -> pop current
-# peek_step(ctx) -> see previous
 # -----------------------
 def push_step(context: CallbackContext, name: str, info: dict = None):
     if 'step_stack' not in context.user_data:
@@ -71,7 +67,6 @@ def pop_step(context: CallbackContext):
     return None
 
 def peek_prev_step(context: CallbackContext):
-    # return previous step (after popping current)
     if 'step_stack' in context.user_data and len(context.user_data['step_stack']) >= 1:
         return context.user_data['step_stack'][-1]
     return None
@@ -80,7 +75,7 @@ def clear_steps(context: CallbackContext):
     context.user_data.pop('step_stack', None)
 
 # -----------------------
-# Button parser (keeps original format)
+# Button parser
 # -----------------------
 def parse_buttons_from_text(text):
     if not text:
@@ -100,10 +95,8 @@ def parse_buttons_from_text(text):
                 if action.startswith(("http://", "https://", "tg://", "https://t.me")):
                     row.append(InlineKeyboardButton(title, url=action))
                 elif action.startswith(("popup:", "alert:")):
-                    # store as callback so generic_callback_cb can show alert
                     row.append(InlineKeyboardButton(title, callback_data=action))
                 else:
-                    # fallback to callback data
                     row.append(InlineKeyboardButton(title, callback_data=action[:64]))
             else:
                 row.append(InlineKeyboardButton(p[:64], callback_data="noop"))
@@ -112,7 +105,7 @@ def parse_buttons_from_text(text):
     return InlineKeyboardMarkup(rows) if rows else None
 
 # -----------------------
-# UI keyboards (main/back/step-back)
+# UI keyboards
 # -----------------------
 def main_menu_kb():
     kb = [
@@ -256,11 +249,9 @@ def menu_create_post_cb(update: Update, context: CallbackContext):
         reply_markup=step_back_kb()
     )
 
-# Save text when creating a text-only post OR when awaiting caption OR when awaiting buttons, logic unified
 def save_text_handler(update: Update, context: CallbackContext):
     user = context.user_data
 
-    # 1) If user is adding buttons to an existing post (awaiting_buttons_for_post_id)
     if user.get('awaiting_buttons_for_post_id'):
         post_id = user.get('awaiting_buttons_for_post_id')
         buttons_raw = update.message.text or ""
@@ -278,7 +269,6 @@ def save_text_handler(update: Update, context: CallbackContext):
         pop_step(context)
         return
 
-    # 2) If user is awaiting caption text for a media they chose Add Caption for
     if user.get('awaiting_caption_text'):
         caption = update.message.text or ""
         fid = user.get('pending_file_id')
@@ -293,7 +283,6 @@ def save_text_handler(update: Update, context: CallbackContext):
         })
         save_json(POST_FILE, posts)
         new_id = len(posts)
-        # Prompt both Add Buttons and Send Post
         kb = [
             [InlineKeyboardButton("➕ Add Buttons", callback_data=f"add_buttons_{new_id}"),
              InlineKeyboardButton("📤 Send Post", callback_data=f"send_post_{new_id}")],
@@ -307,7 +296,6 @@ def save_text_handler(update: Update, context: CallbackContext):
         pop_step(context)
         return
 
-    # 3) Multipost saving (original functionality kept) => After saving show send all/send one buttons
     if user.get('creating_multipost'):
         text = update.message.text or ""
         raw = text
@@ -331,8 +319,7 @@ def save_text_handler(update: Update, context: CallbackContext):
             main_text = "\n".join(main_lines).strip() or "(empty)"
             btn_text = "\n".join(btn_lines).strip()
             posts.append({"id": None, "text": main_text, "buttons_raw": btn_text, "media_id": None, "media_type": None})
-            created.append(len(posts))  # temporary id (we'll reset ids soon)
-        # reassign sequential ids
+            created.append(len(posts))
         for i, p in enumerate(posts):
             p['id'] = i + 1
         save_json(POST_FILE, posts)
@@ -345,7 +332,6 @@ def save_text_handler(update: Update, context: CallbackContext):
         pop_step(context)
         return
 
-    # 4) Editing existing post
     if user.get('editing_post'):
         pid = user.get('editing_post')
         text = update.message.text or ""
@@ -356,7 +342,6 @@ def save_text_handler(update: Update, context: CallbackContext):
             user.pop('editing_post', None)
             pop_step(context)
             return
-        # heuristic parse: split lines into main text and button lines
         lines = text.splitlines()
         btn_lines = []
         main_lines = []
@@ -380,7 +365,6 @@ def save_text_handler(update: Update, context: CallbackContext):
         pop_step(context)
         return
 
-    # 5) Regular "create_post" text handling (if creating_post True)
     if user.get('creating_post'):
         text = update.message.text or ""
         posts = load_json(POST_FILE)
@@ -406,11 +390,10 @@ def save_text_handler(update: Update, context: CallbackContext):
         pop_step(context)
         return
 
-    # otherwise ignore or not relevant
     return
 
 # -----------------------
-# Media handler (photo/video/animation)
+# Media handler
 # -----------------------
 def media_handler(update: Update, context: CallbackContext):
     msg = update.message
@@ -430,7 +413,6 @@ def media_handler(update: Update, context: CallbackContext):
         msg.reply_text("❌ শুধু ছবি/ভিডিও/GIF পাঠাও।", reply_markup=main_menu_kb())
         return
 
-    # If caption already present -> save immediately and ask to add buttons + send
     if msg.caption:
         posts = load_json(POST_FILE)
         posts.append({
@@ -451,7 +433,6 @@ def media_handler(update: Update, context: CallbackContext):
         msg.reply_text("✅ মিডিয়া ও ক্যাপশন সেভ হয়েছে! এখন চাইলে বাটন যোগ করো বা সরাসরি পাঠাও:", reply_markup=InlineKeyboardMarkup(kb))
         return
 
-    # If no caption -> ask whether to add caption or skip
     context.user_data['pending_file_id'] = fid
     context.user_data['pending_type'] = mtype
     push_step(context, 'awaiting_caption_choice', {'file_id': fid, 'type': mtype})
@@ -462,7 +443,6 @@ def media_handler(update: Update, context: CallbackContext):
     ]
     msg.reply_text("📝 আপনি কি ক্যাপশন যোগ করতে চান?", reply_markup=InlineKeyboardMarkup(kb))
 
-# Caption choice callback
 def caption_choice_cb(update: Update, context: CallbackContext):
     q = update.callback_query
     q.answer()
@@ -497,7 +477,6 @@ def caption_choice_cb(update: Update, context: CallbackContext):
     else:
         q.message.reply_text("❌ অঅ-অজানা অপশন", reply_markup=main_menu_kb())
 
-# Add Buttons callback
 def add_buttons_cb(update: Update, context: CallbackContext):
     q = update.callback_query
     q.answer()
@@ -566,13 +545,11 @@ def del_post_cb(update: Update, context: CallbackContext):
     pid = int(q.data.split("_")[-1])
     posts = load_json(POST_FILE)
     posts = [p for p in posts if p['id'] != pid]
-    # reassign ids to keep sequential
-    for i,p in enumerate(posts):
-        p['id'] = i+1
+    for i, p in enumerate(posts):
+        p['id'] = i + 1
     save_json(POST_FILE, posts)
     q.message.reply_text("✅ পোস্ট মুছে দেয়া হয়েছে।", reply_markup=main_menu_kb())
 
-# Edit post flow
 def menu_edit_post_cb(update: Update, context: CallbackContext):
     q = update.callback_query
     q.answer()
@@ -630,7 +607,7 @@ def send_post_to_channels(context: CallbackContext, post: dict):
     return sent
 
 # -----------------------
-# Send post (choose and send)
+# Send post
 # -----------------------
 def menu_send_post_cb(update: Update, context: CallbackContext):
     q = update.callback_query
@@ -663,7 +640,6 @@ def send_post_selected(update: Update, context: CallbackContext):
     sent = send_post_to_channels(context, post)
     q.message.reply_text(f"✅ পোস্ট {sent} চ্যানেলে পাঠানো হয়েছে।", reply_markup=main_menu_kb())
 
-# Send to All (choose post and broadcast)
 def menu_send_all_cb(update: Update, context: CallbackContext):
     q = update.callback_query
     q.answer()
@@ -689,7 +665,6 @@ def choose_all_cb(update: Update, context: CallbackContext):
     sent = send_post_to_channels(context, post)
     q.message.reply_text(f"✅ পোস্ট {sent} চ্যানেলে পাঠানো হয়েছে!", reply_markup=main_menu_kb())
 
-# Multipost send all handler (from earlier multipost flow)
 def multipost_send_all_cb(update: Update, context: CallbackContext):
     q = update.callback_query
     q.answer()
@@ -734,7 +709,6 @@ def generic_callback_cb(update: Update, context: CallbackContext):
     elif data == "noop":
         q.message.reply_text("🔘 বাটন ক্লিক হয়েছে (কোনো কার্য নেই)।")
     else:
-        # fallback: echo action
         q.message.reply_text("🔘 বাটন ক্লিক: " + data)
 
 # -----------------------
@@ -747,16 +721,13 @@ def back_to_menu_cb(update: Update, context: CallbackContext):
     q.message.reply_text("↩️ মূল মেনুতে ফিরে আসা হলো", reply_markup=main_menu_kb())
 
 # -----------------------
-# Step-back (one-step back)
+# Step-back
 # -----------------------
 def step_back_cb(update: Update, context: CallbackContext):
     q = update.callback_query
     q.answer()
-    # pop current step
     current = pop_step(context)
-    # peek previous
     prev = peek_prev_step(context)
-    # Clear flags related to the popped step where appropriate
     if current:
         name = current.get('name')
         if name == 'awaiting_caption_text':
@@ -772,7 +743,6 @@ def step_back_cb(update: Update, context: CallbackContext):
         elif name == 'expecting_forward_for_add':
             context.user_data.pop('expecting_forward_for_add', None)
 
-    # Now restore previous prompt based on prev step
     if not prev:
         q.message.reply_text("↩️ আর কোন পূর্বের ধাপ নেই — মূল মেনুতে ফিরে গেলাম।", reply_markup=main_menu_kb())
         clear_steps(context)
@@ -780,7 +750,6 @@ def step_back_cb(update: Update, context: CallbackContext):
 
     pname = prev.get('name')
     info = prev.get('info', {})
-    # Show appropriate prompt for previous step
     if pname == 'creating_post':
         q.message.reply_text("📝 তুমি পোস্ট তৈরিতে আছ — মিডিয়া পাঠাও বা টেক্সট লিখে পাঠাও।", reply_markup=step_back_kb())
     elif pname == 'awaiting_caption_choice':
@@ -838,7 +807,7 @@ def start_delete_channel_cb(update: Update, context: CallbackContext):
     q.message.reply_text("Choose channel to remove:", reply_markup=InlineKeyboardMarkup(kb))
 
 # -----------------------
-# Scheduling: add schedule UI + scheduler thread
+# Scheduling
 # -----------------------
 def menu_schedule_cb(update: Update, context: CallbackContext):
     q = update.callback_query
@@ -867,7 +836,6 @@ def schedule_post_cb(update: Update, context: CallbackContext):
     if not pid:
         q.message.reply_text("❌ পোস্ট আইডি পাওয়া যায়নি।", reply_markup=main_menu_kb())
         return
-    # ask for time and mode
     context.user_data['scheduling_post'] = pid
     push_step(context, 'scheduling_post', {'post_id': pid})
     q.message.reply_text(
@@ -885,16 +853,12 @@ def schedule_time_received(update: Update, context: CallbackContext):
         return
     text = update.message.text.strip()
     pid = context.user_data.get('scheduling_post')
-    # try parse full datetime first (YYYY-MM-DD HH:MM)
-    dt = None
-    mode = None
     try:
         dt = datetime.strptime(text, "%Y-%m-%d %H:%M")
-        # treat as one-time; ask confirm for one-time or daily
         context.user_data['scheduling_time'] = dt.isoformat()
         push_step(context, 'scheduling_time', {'post_id': pid, 'datetime': dt.isoformat()})
         update.message.reply_text(
-            f"নির্ধারিত সময়: {dt.isoformat()} (UTC?)\n\nএখন নির্বাচন করো:\n- One Time (একবার) হলে `one_time`\n- Daily (প্রতিদিন একই সময়ে পাঠাতে) হলে `daily`",
+            f"নির্ধারিত সময়: {dt.isoformat()} (UTC)\n\nএখন নির্বাচন করো:\n- One Time (একবার) হলে `one_time`\n- Daily (প্রতিদিন একই সময়ে পাঠাতে) হলে `daily`",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("One Time (একবার)", callback_data="schedule_mode_one")],
                 [InlineKeyboardButton("Daily (প্রতিদিন)", callback_data="schedule_mode_daily")],
@@ -905,13 +869,12 @@ def schedule_time_received(update: Update, context: CallbackContext):
     except Exception:
         pass
 
-    # try parse HH:MM for daily
     try:
         dt2 = datetime.strptime(text, "%H:%M")
-        context.user_data['scheduling_time'] = text  # store as HH:MM
+        context.user_data['scheduling_time'] = text
         push_step(context, 'scheduling_time', {'post_id': pid, 'time_hm': text})
         update.message.reply_text(
-            f"নির্ধারিত সময় (প্রতিদিন): {text}\n\nএখন নির্বাচন করো:\n- One Time (একবার) (this will be interpreted as next occurrence)\n- Daily (প্রতিদিন)",
+            f"নির্ধারিত সময় (প্রতিদিন): {text}\n\nএখন নির্বাচন করো:\n- One Time (next occurrence)\n- Daily (প্রতিদিন)",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("One Time (next occurrence)", callback_data="schedule_mode_one")],
                 [InlineKeyboardButton("Daily (প্রতিদিন)", callback_data="schedule_mode_daily")],
@@ -927,7 +890,7 @@ def schedule_time_received(update: Update, context: CallbackContext):
 def schedule_mode_cb(update: Update, context: CallbackContext):
     q = update.callback_query
     q.answer()
-    mode = q.data  # schedule_mode_one or schedule_mode_daily
+    mode = q.data
     pid = context.user_data.get('scheduling_post')
     if not pid:
         q.message.reply_text("❌ পোস্ট আইডি পাওয়া যায়নি।", reply_markup=main_menu_kb())
@@ -938,9 +901,7 @@ def schedule_mode_cb(update: Update, context: CallbackContext):
         return
 
     scheduled = load_json(SCHEDULE_FILE)
-    # create schedule item
     if mode == 'schedule_mode_one':
-        # if stime is HH:MM -> schedule next occurrence (today/tomorrow)
         try:
             if len(stime) == 5 and ":" in stime:
                 hh, mm = map(int, stime.split(":"))
@@ -950,7 +911,6 @@ def schedule_mode_cb(update: Update, context: CallbackContext):
                     candidate += timedelta(days=1)
                 run_at = candidate.isoformat()
             else:
-                # full ISO stored earlier
                 run_at = stime
         except Exception:
             run_at = stime
@@ -958,19 +918,17 @@ def schedule_mode_cb(update: Update, context: CallbackContext):
             "id": len(scheduled) + 1,
             "post_id": pid,
             "mode": "one",
-            "run_at": run_at  # ISO datetime
+            "run_at": run_at
         }
         scheduled.append(item)
         save_json(SCHEDULE_FILE, scheduled)
         q.message.reply_text(f"✅ One-time schedule set for post {pid} at {run_at}.", reply_markup=main_menu_kb())
-        # cleanup
         context.user_data.pop('scheduling_post', None)
         context.user_data.pop('scheduling_time', None)
         pop_step(context)
         pop_step(context)
         return
     elif mode == 'schedule_mode_daily':
-        # stime should be HH:MM or full -> convert to HH:MM
         if len(stime) == 5 and ":" in stime:
             hhmm = stime
         else:
@@ -983,11 +941,11 @@ def schedule_mode_cb(update: Update, context: CallbackContext):
             "id": len(scheduled) + 1,
             "post_id": pid,
             "mode": "daily",
-            "time_hm": hhmm  # "HH:MM"
+            "time_hm": hhmm
         }
         scheduled.append(item)
         save_json(SCHEDULE_FILE, scheduled)
-        q.message.reply_text(f"✅ Daily schedule set for post {pid} at {hhmm} (every day) .", reply_markup=main_menu_kb())
+        q.message.reply_text(f"✅ Daily schedule set for post {pid} at {hhmm} (every day).", reply_markup=main_menu_kb())
         context.user_data.pop('scheduling_post', None)
         context.user_data.pop('scheduling_time', None)
         pop_step(context)
@@ -996,7 +954,9 @@ def schedule_mode_cb(update: Update, context: CallbackContext):
     else:
         q.message.reply_text("❌ Unknown scheduling mode.", reply_markup=main_menu_kb())
 
-# scheduler thread: wakes every 30s and checks scheduled posts (simple implementation)
+# -----------------------
+# Scheduler thread
+# -----------------------
 def scheduler_loop(updater_dispatcher):
     logging.info("Scheduler thread started.")
     while True:
@@ -1009,9 +969,7 @@ def scheduler_loop(updater_dispatcher):
                     try:
                         if item.get('mode') == 'one' and 'run_at' in item:
                             run_dt = datetime.fromisoformat(item['run_at'])
-                            # allow small tolerance: if now >= run_dt and within a minute/2
                             if now >= run_dt:
-                                # send post
                                 posts = load_json(POST_FILE)
                                 post = next((p for p in posts if p['id'] == item['post_id']), None)
                                 if post:
@@ -1031,14 +989,11 @@ def scheduler_loop(updater_dispatcher):
                                                 updater_dispatcher.bot.send_message(chat_id=ch['id'], text=caption or "(No text)", parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
                                         except Exception:
                                             logging.exception("Scheduler send error to channel %s", ch.get('id'))
-                                # mark for removal
                                 to_remove.append(item)
                         elif item.get('mode') == 'daily' and 'time_hm' in item:
                             hhmm = item['time_hm']
                             hh, mm = map(int, hhmm.split(":"))
-                            # check if current time matches hh:mm (with 0 tolerance minute)
                             if now.hour == hh and now.minute == mm:
-                                # ensure we don't send same daily item multiple times in same minute: we will store last_sent timestamp in item if needed
                                 last_sent = item.get('last_sent')
                                 can_send = False
                                 if not last_sent:
@@ -1046,7 +1001,6 @@ def scheduler_loop(updater_dispatcher):
                                 else:
                                     try:
                                         last_dt = datetime.fromisoformat(last_sent)
-                                        # if last_sent is older than today 00:00 then send (or if last_sent < now - 23 hours)
                                         if (now - last_dt) > timedelta(minutes=10):
                                             can_send = True
                                     except:
@@ -1071,30 +1025,23 @@ def scheduler_loop(updater_dispatcher):
                                                     updater_dispatcher.bot.send_message(chat_id=ch['id'], text=caption or "(No text)", parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
                                             except Exception:
                                                 logging.exception("Scheduler send error to channel %s", ch.get('id'))
-                                    # update last_sent
                                     item['last_sent'] = now.isoformat()
-                                    # save change
                                     save_json(SCHEDULE_FILE, scheduled)
                     except Exception:
                         logging.exception("Scheduler item processing error for %s", item)
-                # remove one-time items that were sent
                 if to_remove:
                     scheduled = [s for s in scheduled if s not in to_remove]
                     save_json(SCHEDULE_FILE, scheduled)
-            # sleep a bit
             time.sleep(20)
         except Exception:
             logging.exception("Scheduler loop error")
             time.sleep(30)
 
 # -----------------------
-# Generic callback handler registration points
+# Handler registration
 # -----------------------
 def register_handlers(dp):
-    # Command
     dp.add_handler(CommandHandler("start", start))
-
-    # Menu callbacks
     dp.add_handler(CallbackQueryHandler(menu_add_channel_cb, pattern="^menu_add_channel$"))
     dp.add_handler(CallbackQueryHandler(menu_channel_list_cb, pattern="^menu_channel_list$"))
     dp.add_handler(CallbackQueryHandler(menu_create_post_cb, pattern="^menu_create_post$"))
@@ -1106,8 +1053,6 @@ def register_handlers(dp):
     dp.add_handler(CallbackQueryHandler(menu_delete_cb, pattern="^menu_delete$"))
     dp.add_handler(CallbackQueryHandler(menu_guide_cb, pattern="^menu_guide$"))
     dp.add_handler(CallbackQueryHandler(back_to_menu_cb, pattern="^back_to_menu$"))
-
-    # dynamic callbacks
     dp.add_handler(CallbackQueryHandler(view_channel_cb, pattern=r"^view_channel_"))
     dp.add_handler(CallbackQueryHandler(remove_channel_cb, pattern=r"^remove_channel_"))
     dp.add_handler(CallbackQueryHandler(view_post_cb, pattern=r"^view_post_"))
@@ -1115,45 +1060,22 @@ def register_handlers(dp):
     dp.add_handler(CallbackQueryHandler(choose_edit_post_cb, pattern=r"^edit_post_"))
     dp.add_handler(CallbackQueryHandler(send_post_selected, pattern=r"^send_post_"))
     dp.add_handler(CallbackQueryHandler(choose_all_cb, pattern=r"^choose_all_"))
-
-    # add buttons and caption choices
     dp.add_handler(CallbackQueryHandler(add_buttons_cb, pattern=r"^add_buttons_"))
     dp.add_handler(CallbackQueryHandler(caption_choice_cb, pattern=r"^(add_caption|skip_caption)$"))
-
-    # delete flows
     dp.add_handler(CallbackQueryHandler(start_delete_post_cb, pattern=r"^start_delete_post$"))
     dp.add_handler(CallbackQueryHandler(start_delete_channel_cb, pattern=r"^start_delete_channel$"))
-
-    # generic callback (popup/alert/noop)
     dp.add_handler(CallbackQueryHandler(generic_callback_cb, pattern=r"^(popup:|alert:|noop)"))
-
-    # media, forward, and text handlers
     dp.add_handler(MessageHandler(Filters.forwarded & Filters.chat_type.private, forward_handler))
     dp.add_handler(MessageHandler(Filters.photo | Filters.video | Filters.animation, media_handler))
     dp.add_handler(MessageHandler(Filters.text & Filters.chat_type.private, save_text_handler))
-
-    # send and other small callbacks
-    dp.add_handler(CallbackQueryHandler(menu_send_post_cb, pattern="^menu_send_post$"))
-    dp.add_handler(CallbackQueryHandler(menu_send_all_cb, pattern="^menu_send_all$"))
-    dp.add_handler(CallbackQueryHandler(menu_multipost_cb, pattern="^menu_multipost$"))
-
-    # small alias handlers to match previous naming expectations
-    dp.add_handler(CallbackQueryHandler(add_buttons_cb, pattern=r"^add_buttons_"))
-    dp.add_handler(CallbackQueryHandler(menu_channel_list_cb, pattern="^menu_channel_list$"))
-
-    # multipost send all
     dp.add_handler(CallbackQueryHandler(multipost_send_all_cb, pattern="^multipost_send_all$"))
-
-    # scheduling
     dp.add_handler(CallbackQueryHandler(menu_schedule_cb, pattern="^menu_schedule$"))
     dp.add_handler(CallbackQueryHandler(schedule_post_cb, pattern=r"^schedule_post_"))
     dp.add_handler(CallbackQueryHandler(schedule_mode_cb, pattern=r"^schedule_mode_"))
-
-    # step back
     dp.add_handler(CallbackQueryHandler(step_back_cb, pattern=r"^step_back$"))
 
 # -----------------------
-# Main: run
+# Main
 # -----------------------
 def main():
     ensure_files()
@@ -1164,28 +1086,19 @@ def main():
     try:
         updater = Updater(TOKEN, use_context=True)
         dp = updater.dispatcher
-
         register_handlers(dp)
-
-        # also handle scheduling time text input in message handler (separate from generic save_text)
-        # Use a custom handler for scheduling times BEFORE the generic text handler so it gets priority
         dp.add_handler(MessageHandler(Filters.text & Filters.chat_type.private, schedule_time_received), group=1)
-
         print("✅ Bot started successfully!")
         updater.start_polling()
-
-        # start scheduler thread
         sched_thread = threading.Thread(target=scheduler_loop, args=(updater,), daemon=True)
         sched_thread.start()
-
         updater.idle()
-
     except Exception as e:
         print(f"❌ Bot startup failed: {e}")
         raise
 
 # -----------------------
-# Flask keep-alive (for Render)
+# Flask keep-alive
 # -----------------------
 app = Flask(__name__)
 
@@ -1198,8 +1111,6 @@ def run_flask():
     app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
-    # Start Flask in a separate thread
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
-    # Run the bot
     main()
