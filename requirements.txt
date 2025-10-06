@@ -1,5 +1,2 @@
-Flask==3.0.3
-Werkzeug==3.0.3
 python-telegram-bot==13.7
-APScheduler==3.6.3
-imghdr2==0.1.10
+Flask==2.3.2
