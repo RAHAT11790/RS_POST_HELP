@@ -11,7 +11,15 @@ from apscheduler.schedulers.background import BackgroundScheduler
 # -----------------------
 # Logging
 # -----------------------
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO,
+    handlers=[
+        logging.FileHandler("bot.log"),  # Log to a file for debugging
+        logging.StreamHandler()  # Also log to console
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # -----------------------
 # Config / Files
@@ -26,12 +34,13 @@ SCHEDULED_POSTS_FILE = "scheduled_posts.json"
 # -----------------------
 def load_json(filename):
     if not os.path.exists(filename):
+        logger.warning(f"File {filename} does not exist, returning empty list.")
         return []
     try:
         with open(filename, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
-        logging.error(f"Error loading {filename}: {e}")
+        logger.error(f"Error loading {filename}: {e}")
         return []
 
 def save_json(filename, data):
@@ -39,7 +48,7 @@ def save_json(filename, data):
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        logging.error(f"Error saving {filename}: {e}")
+        logger.error(f"Error saving {filename}: {e}")
         if 'update' in globals() and update:
             update.message.reply_text("❌ ফাইল সেভ করতে সমস্যা হয়েছে। দয়া করে আবার চেষ্টা করুন।")
 
@@ -581,6 +590,7 @@ def view_post_cb(update: Update, context: CallbackContext):
         else:
             q.message.reply_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
     except Exception as e:
+        logger.error(f"Error displaying post {pid}: {e}")
         q.message.reply_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
 
 def del_post_cb(update: Update, context: CallbackContext):
@@ -677,7 +687,7 @@ def send_post_selected(update: Update, context: CallbackContext):
                 context.bot.send_message(chat_id=ch['id'], text=caption or "(No text)", parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
             sent += 1
         except Exception as e:
-            print("Send Error:", e)
+            logger.error(f"Error sending post {post_id} to channel {ch['id']}: {e}")
     q.message.reply_text(f"✅ পোস্ট {sent} চ্যানেলে পাঠানো হয়েছে।", reply_markup=main_menu_kb())
 
 def menu_send_all_cb(update: Update, context: CallbackContext):
@@ -719,7 +729,7 @@ def choose_all_cb(update: Update, context: CallbackContext):
                 context.bot.send_message(chat_id=ch['id'], text=caption or "(No text)", parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
             sent += 1
         except Exception as e:
-            print("Send All Error:", e)
+            logger.error(f"Error sending post {pid} to channel {ch['id']}: {e}")
     q.message.reply_text(f"✅ পোস্ট {sent} চ্যানেলে পাঠানো হয়েছে!", reply_markup=main_menu_kb())
 
 def send_all_new_posts_cb(update: Update, context: CallbackContext):
@@ -747,7 +757,7 @@ def send_all_new_posts_cb(update: Update, context: CallbackContext):
                     context.bot.send_message(chat_id=ch['id'], text=caption or "(No text)", parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
                 sent += 1
             except Exception as e:
-                print("Send All New Posts Error:", e)
+                logger.error(f"Error sending new post {pid} to channel {ch['id']}: {e}")
     q.message.reply_text(f"✅ মোট {sent}টি পোস্ট পাঠানো হয়েছে!", reply_markup=main_menu_kb())
     context.user_data.pop('new_multipost_ids', None)
 
@@ -825,7 +835,7 @@ def check_scheduled_posts(context: CallbackContext):
                     else:
                         context.bot.send_message(chat_id=ch['id'], text=caption or "(No text)", parse_mode=ParseMode.MARKDOWN, reply_markup=markup)
                 except Exception as e:
-                    print("Scheduled Post Error:", e)
+                    logger.error(f"Error sending scheduled post {sp['post_id']} to channel {ch['id']}: {e}")
             if sp['type'] == "one_time":
                 posts_to_remove.append(sp)
     scheduled_posts = [sp for sp in scheduled_posts if sp not in posts_to_remove]
@@ -983,7 +993,7 @@ def start_delete_channel_cb(update: Update, context: CallbackContext):
 def main():
     ensure_files()
     if not TOKEN:
-        print("ERROR: BOT_TOKEN environment variable not set. Exiting.")
+        logger.error("BOT_TOKEN environment variable not set. Exiting.")
         return
 
     try:
@@ -994,6 +1004,7 @@ def main():
         scheduler = BackgroundScheduler(timezone="Asia/Dhaka")
         scheduler.add_job(check_scheduled_posts, 'interval', minutes=1, args=[dp.bot.get_context()])
         scheduler.start()
+        logger.info("Scheduler started with Asia/Dhaka timezone.")
 
         # Command
         dp.add_handler(CommandHandler("start", start))
@@ -1040,12 +1051,12 @@ def main():
         dp.add_handler(MessageHandler(Filters.photo | Filters.video | Filters.animation, media_handler))
         dp.add_handler(MessageHandler(Filters.text & Filters.chat_type.private, save_text_handler))
 
-        print("✅ Bot started successfully!")
+        logger.info("Bot started successfully!")
         updater.start_polling()
         updater.idle()
 
     except Exception as e:
-        print(f"❌ Bot startup failed: {e}")
+        logger.error(f"Bot startup failed: {e}")
         raise
 
 # -----------------------
